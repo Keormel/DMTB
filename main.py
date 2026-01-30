@@ -3,6 +3,11 @@ from dataclasses import dataclass, field
 from typing import List, Set, Tuple, Optional, Dict, Any
 import json
 import os
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import threading
+import random
+import time
 
 
 def _ask_int(prompt: str, *, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
@@ -495,5 +500,595 @@ def main() -> None:
             continue
 
 
+class GraphGUI:
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.graph = Graph(directed=False)
+        self.setup_ui()
+
+    def setup_ui(self) -> None:
+        """Создание графического интерфейса"""
+        # Верхняя панель с кнопками
+        top_frame = ttk.Frame(self.root)
+        top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+
+        ttk.Button(top_frame, text="📥 Ввести граф", command=self.input_graph).pack(side=tk.LEFT, padx=2)
+        ttk.Button(top_frame, text="🎲 Сгенерировать", command=self.generate_graph_dialog).pack(side=tk.LEFT, padx=2)
+        ttk.Button(top_frame, text="📊 Показать", command=self.show_graph).pack(side=tk.LEFT, padx=2)
+        ttk.Button(top_frame, text="➕ Добавить ребро", command=self.add_edge_dialog).pack(side=tk.LEFT, padx=2)
+        ttk.Button(top_frame, text="➖ Удалить ребро", command=self.remove_edge_dialog).pack(side=tk.LEFT, padx=2)
+        ttk.Button(top_frame, text="💾 Сохранить", command=self.save_file).pack(side=tk.LEFT, padx=2)
+        ttk.Button(top_frame, text="📂 Загрузить", command=self.load_file).pack(side=tk.LEFT, padx=2)
+        ttk.Button(top_frame, text="🔄 Преобразование", command=self.show_transformation).pack(side=tk.LEFT, padx=2)
+
+        # Кнопка переключения типа графа
+        self.type_label = ttk.Label(top_frame, text="Неориентированный")
+        self.type_label.pack(side=tk.LEFT, padx=10)
+        ttk.Button(top_frame, text="🔄 Сменить тип", command=self.toggle_graph_type).pack(side=tk.LEFT, padx=2)
+
+        # Основная область с текстом
+        content_frame = ttk.Frame(self.root)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Текстовое поле с прокруткой
+        scrollbar = ttk.Scrollbar(content_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.text_output = tk.Text(content_frame, yscrollcommand=scrollbar.set, font=("Courier", 10))
+        self.text_output.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.text_output.yview)
+
+        self.text_output.insert(tk.END, "Лабораторная: Хранение графа в памяти (Python)\n")
+        self.text_output.insert(tk.END, "Внутри программа хранит граф как список смежности.\n\n")
+        self.text_output.config(state=tk.DISABLED)
+
+    def log(self, text: str) -> None:
+        """Добавить текст в вывод"""
+        self.text_output.config(state=tk.NORMAL)
+        self.text_output.insert(tk.END, text + "\n")
+        self.text_output.see(tk.END)
+        self.text_output.config(state=tk.DISABLED)
+
+    def clear_output(self) -> None:
+        """Очистить вывод"""
+        self.text_output.config(state=tk.NORMAL)
+        self.text_output.delete(1.0, tk.END)
+        self.text_output.config(state=tk.DISABLED)
+
+    def toggle_graph_type(self) -> None:
+        """Переключить тип графа"""
+        self.graph.directed = not self.graph.directed
+        self.graph.normalize()
+        self.type_label.config(text="Ориентированный" if self.graph.directed else "Неориентированный")
+        self.log(f"Тип графа изменен на: {'Ориентированный' if self.graph.directed else 'Неориентированный'}")
+
+    def input_graph(self) -> None:
+        """Диалог ввода графа"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Ввести граф")
+        dialog.geometry("400x250")
+
+        ttk.Label(dialog, text="Выберите форму ввода:").pack(pady=10)
+
+        ttk.Button(dialog, text="Список смежности", command=lambda: self.input_adj_list_dialog(dialog)).pack(pady=5)
+        ttk.Button(dialog, text="Матрица смежности", command=lambda: self.input_adj_matrix_dialog(dialog)).pack(pady=5)
+        ttk.Button(dialog, text="Матрица инцидентности", command=lambda: self.input_incidence_dialog(dialog)).pack(pady=5)
+
+    def input_adj_list_dialog(self, parent: tk.Widget) -> None:
+        """Диалог для ввода списка смежности"""
+        parent.destroy()
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Ввести список смежности")
+        dialog.geometry("600x500")
+
+        # Верхняя часть
+        top_frame = ttk.Frame(dialog)
+        top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(top_frame, text="Количество вершин N:").pack(side=tk.LEFT, padx=5)
+        n_var = tk.StringVar(value="5")
+        entry_n = ttk.Entry(top_frame, textvariable=n_var, width=10)
+        entry_n.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(dialog, text="Для каждой вершины введите соседей через пробел (номера 1..N, или оставьте пустым):").pack(pady=5)
+
+        # Главный frame со скроллом
+        main_frame = ttk.Frame(dialog)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(main_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Список для всех строк
+        rows_frame = ttk.Frame(main_frame)
+        rows_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Текстовое поле вместо множества Entry-й
+        text_widget = tk.Text(rows_frame, height=15, width=50, yscrollcommand=scrollbar.set)
+        text_widget.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=text_widget.yview)
+
+        def process_input() -> None:
+            try:
+                n = int(n_var.get())
+                if n < 1:
+                    messagebox.showerror("Ошибка", "N должно быть >= 1")
+                    return
+                
+                text_content = text_widget.get("1.0", tk.END).strip()
+                lines = text_content.split('\n')
+                
+                if len(lines) < n:
+                    messagebox.showerror("Ошибка", f"Нужно {n} строк, а введено {len(lines)}")
+                    return
+                
+                adj_list: List[List[int]] = [[] for _ in range(n)]
+
+                for i in range(n):
+                    line = lines[i].strip()
+                    if line == "":
+                        adj_list[i] = []
+                    else:
+                        nums = [int(x) - 1 for x in line.split()]
+                        if any(x < 0 or x >= n for x in nums):
+                            messagebox.showerror("Ошибка", f"Строка {i+1}: соседи должны быть в диапазоне 1..{n}")
+                            return
+                        adj_list[i] = nums
+
+                self.graph = Graph.from_adj_list(adj_list, directed=self.graph.directed)
+                dialog.destroy()
+                self.clear_output()
+                self.log("✓ Граф введён и сохранён в памяти (как список смежности).")
+                self.show_adj_list()
+            except ValueError as e:
+                messagebox.showerror("Ошибка", f"Некорректный ввод: {e}")
+
+        bottom_frame = ttk.Frame(dialog)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+        ttk.Button(bottom_frame, text="Готово", command=process_input).pack()
+
+    def input_adj_matrix_dialog(self, parent: tk.Widget) -> None:
+        """Диалог для ввода матрицы смежности"""
+        parent.destroy()
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Ввести матрицу смежности")
+        dialog.geometry("600x500")
+
+        # Верхняя часть
+        top_frame = ttk.Frame(dialog)
+        top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(top_frame, text="Количество вершин N:").pack(side=tk.LEFT, padx=5)
+        n_var = tk.StringVar(value="5")
+        entry_n = ttk.Entry(top_frame, textvariable=n_var, width=10)
+        entry_n.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(dialog, text="Введите матрицу смежности N x N (0 или 1, строки через Enter):").pack(pady=5)
+
+        # Главный frame со скроллом
+        main_frame = ttk.Frame(dialog)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(main_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Текстовое поле вместо множества Entry-й
+        text_widget = tk.Text(main_frame, height=15, width=50, yscrollcommand=scrollbar.set)
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=text_widget.yview)
+
+        def process_input() -> None:
+            try:
+                n = int(n_var.get())
+                if n < 1:
+                    messagebox.showerror("Ошибка", "N должно быть >= 1")
+                    return
+                
+                text_content = text_widget.get("1.0", tk.END).strip()
+                lines = text_content.split('\n')
+                
+                if len(lines) < n:
+                    messagebox.showerror("Ошибка", f"Нужно {n} строк, а введено {len(lines)}")
+                    return
+                
+                mat: List[List[int]] = []
+
+                for i in range(n):
+                    line = lines[i].strip()
+                    if not line:
+                        messagebox.showerror("Ошибка", f"Строка {i+1} пуста")
+                        return
+                    nums = [int(x) for x in line.split()]
+                    if len(nums) != n:
+                        messagebox.showerror("Ошибка", f"Строка {i+1} должна содержать {n} значений")
+                        return
+                    if any(x not in (0, 1) for x in nums):
+                        messagebox.showerror("Ошибка", "Матрица должна содержать только 0 и 1")
+                        return
+                    mat.append(nums)
+
+                self.graph = Graph.from_adj_matrix(mat, directed=self.graph.directed)
+                dialog.destroy()
+                self.clear_output()
+                self.log("✓ Граф введён и сохранён в памяти (как список смежности).")
+                self.show_adj_list()
+            except ValueError as e:
+                messagebox.showerror("Ошибка", f"Некорректный ввод: {e}")
+
+        bottom_frame = ttk.Frame(dialog)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+        ttk.Button(bottom_frame, text="Готово", command=process_input).pack()
+
+    def input_incidence_dialog(self, parent: tk.Widget) -> None:
+        """Диалог для ввода матрицы инцидентности"""
+        parent.destroy()
+        messagebox.showinfo("Информация", "Функция пока в разработке")
+
+    def show_graph(self) -> None:
+        """Показать граф"""
+        if self.graph.n == 0:
+            messagebox.showwarning("Ошибка", "Граф пустой. Сначала введите граф.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Показать граф")
+        dialog.geometry("400x200")
+
+        ttk.Label(dialog, text="Выберите форму вывода:").pack(pady=10)
+
+        ttk.Button(dialog, text="Список смежности", command=lambda: [self.show_adj_list(), dialog.destroy()]).pack(pady=5)
+        ttk.Button(dialog, text="Матрица смежности", command=lambda: [self.show_adj_matrix(), dialog.destroy()]).pack(pady=5)
+        ttk.Button(dialog, text="Матрица инцидентности", command=lambda: [self.show_incidence_matrix(), dialog.destroy()]).pack(pady=5)
+
+    def show_adj_list(self) -> None:
+        """Показать список смежности"""
+        self.clear_output()
+        self.log("\n📋 Список смежности (вершины 1..N):")
+        for i, nei in enumerate(self.graph.to_adj_list(), start=1):
+            if nei:
+                self.log(f"{i}: " + " ".join(str(v + 1) for v in nei))
+            else:
+                self.log(f"{i}: -")
+
+    def show_adj_matrix(self) -> None:
+        """Показать матрицу смежности"""
+        self.clear_output()
+        self.log("\n📊 Матрица смежности:")
+        mat = self.graph.to_adj_matrix()
+        if not mat:
+            self.log("(пусто)")
+            return
+
+        cols = len(mat[0])
+        width = 3
+        header = "    " + " ".join(f"{j+1:>{width}}" for j in range(cols))
+        self.log(header)
+
+        for i, row in enumerate(mat, start=1):
+            self.log(f"{i:>{3}} " + " ".join(f"{x:>{width}}" for x in row))
+
+    def show_incidence_matrix(self) -> None:
+        """Показать матрицу инцидентности"""
+        self.clear_output()
+        self.log("\n📊 Матрица инцидентности (V x E):")
+        mat = self.graph.to_incidence()
+        if not mat:
+            self.log("(пусто)")
+            return
+
+        cols = len(mat[0]) if mat else 0
+        width = 3
+        header = "    " + " ".join(f"{j+1:>{width}}" for j in range(cols))
+        self.log(header)
+
+        for i, row in enumerate(mat, start=1):
+            self.log(f"{i:>{3}} " + " ".join(f"{x:>{width}}" for x in row))
+
+    def add_edge_dialog(self) -> None:
+        """Диалог добавления ребра"""
+        if self.graph.n == 0:
+            messagebox.showwarning("Ошибка", "Граф пустой.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Добавить ребро")
+        dialog.geometry("300x150")
+
+        ttk.Label(dialog, text=f"u (1..{self.graph.n}):").pack(pady=5)
+        u_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=u_var).pack(pady=5)
+
+        ttk.Label(dialog, text=f"v (1..{self.graph.n}):").pack(pady=5)
+        v_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=v_var).pack(pady=5)
+
+        def add() -> None:
+            try:
+                u = int(u_var.get()) - 1
+                v = int(v_var.get()) - 1
+                if not (0 <= u < self.graph.n and 0 <= v < self.graph.n):
+                    messagebox.showerror("Ошибка", f"Вершины должны быть в диапазоне 1..{self.graph.n}")
+                    return
+                self.graph.add_edge(u, v)
+                self.graph.normalize()
+                dialog.destroy()
+                self.show_adj_list()
+                messagebox.showinfo("Успех", f"Ребро ({u+1}, {v+1}) добавлено")
+            except ValueError:
+                messagebox.showerror("Ошибка", "Введите целые числа")
+
+        ttk.Button(dialog, text="Добавить", command=add).pack(pady=10)
+
+    def remove_edge_dialog(self) -> None:
+        """Диалог удаления ребра"""
+        if self.graph.n == 0:
+            messagebox.showwarning("Ошибка", "Граф пустой.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Удалить ребро")
+        dialog.geometry("300x150")
+
+        ttk.Label(dialog, text=f"u (1..{self.graph.n}):").pack(pady=5)
+        u_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=u_var).pack(pady=5)
+
+        ttk.Label(dialog, text=f"v (1..{self.graph.n}):").pack(pady=5)
+        v_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=v_var).pack(pady=5)
+
+        def remove() -> None:
+            try:
+                u = int(u_var.get()) - 1
+                v = int(v_var.get()) - 1
+                if not (0 <= u < self.graph.n and 0 <= v < self.graph.n):
+                    messagebox.showerror("Ошибка", f"Вершины должны быть в диапазоне 1..{self.graph.n}")
+                    return
+                self.graph.remove_edge(u, v)
+                self.graph.normalize()
+                dialog.destroy()
+                self.show_adj_list()
+                messagebox.showinfo("Успех", f"Ребро ({u+1}, {v+1}) удалено")
+            except ValueError:
+                messagebox.showerror("Ошибка", "Введите целые числа")
+
+        ttk.Button(dialog, text="Удалить", command=remove).pack(pady=10)
+
+    def save_file(self) -> None:
+        """Сохранить в JSON файл"""
+        if self.graph.n == 0:
+            messagebox.showwarning("Ошибка", "Граф пустой. Нечего сохранять.")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filepath:
+            try:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(self.graph.to_dict(), f, ensure_ascii=False, indent=2)
+                messagebox.showinfo("Успех", f"Сохранено в {filepath}")
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Ошибка сохранения: {e}")
+
+    def load_file(self) -> None:
+        """Загрузить из JSON файла"""
+        filepath = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filepath:
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                self.graph = Graph.from_dict(d)
+                self.type_label.config(text="Ориентированный" if self.graph.directed else "Неориентированный")
+                self.clear_output()
+                self.log(f"✓ Загружено из {filepath}")
+                self.show_adj_list()
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Ошибка загрузки: {e}")
+
+    def generate_graph_dialog(self) -> None:
+        """Диалог для генерации случайного графа"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Генерировать граф")
+        dialog.geometry("350x250")
+
+        ttk.Label(dialog, text="Количество вершин N:").pack(pady=5)
+        n_var = tk.StringVar(value="5")
+        ttk.Entry(dialog, textvariable=n_var, width=10).pack(pady=5)
+
+        ttk.Label(dialog, text="Вероятность ребра (0.0 - 1.0):").pack(pady=5)
+        prob_var = tk.StringVar(value="0.3")
+        ttk.Entry(dialog, textvariable=prob_var, width=10).pack(pady=5)
+
+        ttk.Label(dialog, text="Тип генерации:").pack(pady=5)
+        gen_type = tk.StringVar(value="random")
+        ttk.Radiobutton(dialog, text="Случайный граф", variable=gen_type, value="random").pack()
+        ttk.Radiobutton(dialog, text="Полный граф", variable=gen_type, value="complete").pack()
+        ttk.Radiobutton(dialog, text="Дерево", variable=gen_type, value="tree").pack()
+
+        def generate() -> None:
+            try:
+                n = int(n_var.get())
+                if n < 1 or n > 100:
+                    messagebox.showerror("Ошибка", "N должно быть от 1 до 100")
+                    return
+
+                prob = float(prob_var.get())
+                if not (0 <= prob <= 1):
+                    messagebox.showerror("Ошибка", "Вероятность должна быть от 0 до 1")
+                    return
+
+                gtype = gen_type.get()
+
+                # Генерируем граф
+                adj_list: List[List[int]] = [[] for _ in range(n)]
+
+                if gtype == "random":
+                    for i in range(n):
+                        for j in range(i + 1, n):
+                            if random.random() < prob:
+                                adj_list[i].append(j)
+                                adj_list[j].append(i)
+                elif gtype == "complete":
+                    for i in range(n):
+                        for j in range(i + 1, n):
+                            adj_list[i].append(j)
+                            adj_list[j].append(i)
+                elif gtype == "tree":
+                    # Простое дерево: каждая вершина i связана с вершиной i+1
+                    for i in range(n - 1):
+                        adj_list[i].append(i + 1)
+                        adj_list[i + 1].append(i)
+
+                # Сортируем список смежности
+                for i in range(n):
+                    adj_list[i].sort()
+
+                self.graph = Graph.from_adj_list(adj_list, directed=self.graph.directed)
+                dialog.destroy()
+                self.clear_output()
+                self.log(f"✓ Сгенерирован {gtype} граф с {n} вершинами")
+                self.show_adj_list()
+            except ValueError:
+                messagebox.showerror("Ошибка", "Некорректный ввод")
+
+        ttk.Button(dialog, text="Генерировать", command=generate).pack(pady=10)
+
+    def show_transformation(self) -> None:
+        """Показать процедуру преобразования графа между представлениями"""
+        if self.graph.n == 0:
+            messagebox.showwarning("Ошибка", "Граф пустой. Сначала введите или сгенерируйте граф.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Преобразование графа")
+        dialog.geometry("800x600")
+
+        # Текстовое поле с прокруткой
+        text_frame = ttk.Frame(dialog)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        output_text = tk.Text(text_frame, font=("Courier", 9), yscrollcommand=scrollbar.set)
+        output_text.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=output_text.yview)
+
+        def log_step(text: str) -> None:
+            output_text.config(state=tk.NORMAL)
+            output_text.insert(tk.END, text + "\n")
+            output_text.see(tk.END)
+            output_text.update()
+            output_text.config(state=tk.DISABLED)
+
+        def show_steps() -> None:
+            output_text.config(state=tk.NORMAL)
+            output_text.delete(1.0, tk.END)
+            output_text.config(state=tk.DISABLED)
+
+            n = self.graph.n
+            log_step("=" * 70)
+            log_step("ПРОЦЕДУРА ПРЕОБРАЗОВАНИЯ ГРАФА")
+            log_step("=" * 70)
+            log_step("")
+
+            # Шаг 1: Список смежности
+            log_step("ШАГ 1: ИСХОДНОЕ ПРЕДСТАВЛЕНИЕ - СПИСОК СМЕЖНОСТИ")
+            log_step("-" * 70)
+            log_step("Внутри программа хранит граф как список смежности (множества).\n")
+            adj_list = self.graph.to_adj_list()
+            for i, neighbors in enumerate(adj_list, start=1):
+                if neighbors:
+                    log_step(f"  Вершина {i}: {neighbors}")
+                else:
+                    log_step(f"  Вершина {i}: (нет соседей)")
+            log_step("")
+            time.sleep(0.5)
+
+            # Шаг 2: Матрица смежности
+            log_step("ШАГ 2: ПРЕОБРАЗОВАНИЕ В МАТРИЦУ СМЕЖНОСТИ")
+            log_step("-" * 70)
+            log_step("Для каждой пары вершин (i, j) в матрице M[i][j]:")
+            log_step("  - если есть ребро между i и j, то M[i][j] = 1")
+            log_step("  - иначе M[i][j] = 0\n")
+
+            mat = self.graph.to_adj_matrix()
+            width = 3
+            header = "    " + " ".join(f"{j+1:>{width}}" for j in range(len(mat[0])))
+            log_step(header)
+            for i, row in enumerate(mat, start=1):
+                log_step(f"{i:>{3}} " + " ".join(f"{x:>{width}}" for x in row))
+            log_step("")
+            time.sleep(0.5)
+
+            # Шаг 3: Матрица инцидентности
+            log_step("ШАГ 3: ПРЕОБРАЗОВАНИЕ В МАТРИЦУ ИНЦИДЕНТНОСТИ")
+            log_step("-" * 70)
+            log_step("Матрица V x E (вершины x рёбра).")
+            log_step("Для каждого ребра e и вершины v:")
+            if self.graph.directed:
+                log_step("  - M[v][e] = -1, если ребро из v")
+                log_step("  - M[v][e] = +1, если ребро в v")
+            else:
+                log_step("  - M[v][e] = 1, если v инцидентна ребру")
+                log_step("  - M[v][e] = 2, если ребро - петля (v-v)")
+            log_step("  - M[v][e] = 0, иначе\n")
+
+            edges = self.graph.to_edge_list()
+            incidence = self.graph.to_incidence()
+
+            log_step(f"Найденные рёбра: {len(edges)}")
+            for idx, (u, v) in enumerate(edges, start=1):
+                log_step(f"  Ребро {idx}: ({u+1}, {v+1})")
+            log_step("")
+
+            if incidence:
+                width = 3
+                header = "    " + " ".join(f"{e+1:>{width}}" for e in range(len(edges)))
+                log_step(header)
+                for i, row in enumerate(incidence, start=1):
+                    log_step(f"{i:>{3}} " + " ".join(f"{x:>{width}}" for x in row))
+            log_step("")
+            time.sleep(0.5)
+
+            # Шаг 4: Список рёбер
+            log_step("ШАГ 4: ПРЕДСТАВЛЕНИЕ СПИСКОМ РЁБЕР")
+            log_step("-" * 70)
+            log_step("Простой перечень всех рёбер в графе:\n")
+            for idx, (u, v) in enumerate(edges, start=1):
+                log_step(f"  Ребро {idx}: ({u+1}, {v+1})")
+            log_step("")
+            time.sleep(0.5)
+
+            # Итоговая информация
+            log_step("=" * 70)
+            log_step("ИТОГОВАЯ ИНФОРМАЦИЯ")
+            log_step("=" * 70)
+            log_step(f"Тип графа: {'Ориентированный' if self.graph.directed else 'Неориентированный'}")
+            log_step(f"Количество вершин: {n}")
+            log_step(f"Количество рёбер: {len(edges)}")
+            log_step(f"Плотность графа: {len(edges) / (n * (n-1) / 2) if n > 1 else 0:.2%}")
+            log_step("=" * 70)
+
+        # Запускаем показ шагов в отдельном потоке
+        thread = threading.Thread(target=show_steps, daemon=True)
+        thread.start()
+
+
+
 if __name__ == "__main__":
-    main()
+    root = tk.Tk()
+    root.title("Лабораторная: Хранение графа в памяти")
+    root.geometry("900x700")
+    root.resizable(True, True)
+    
+    app = GraphGUI(root)
+    root.mainloop()
