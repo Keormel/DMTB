@@ -9,6 +9,8 @@ import threading
 import random
 import time
 
+IncidenceMode = str
+
 
 def _ask_int(prompt: str, *, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
     while True:
@@ -56,7 +58,6 @@ def _parse_ints_line(line: str) -> Optional[List[int]]:
 @dataclass
 class Graph:
     directed: bool = False
-    # В памяти храним как список смежности (множества)
     adj: List[Set[int]] = field(default_factory=list)
 
     @property
@@ -88,7 +89,6 @@ class Graph:
             for v in list(self.adj[u]):
                 self.adj[v].add(u)
 
-    # --- Конвертации ---
     @staticmethod
     def from_adj_matrix(mat: List[List[int]], directed: bool) -> Graph:
         n = len(mat)
@@ -193,24 +193,41 @@ class Graph:
                         edges.append((a, b))
         return edges
 
-    def to_incidence(self) -> List[List[int]]:
-        V = self.n
+    def to_incidence_matrix(
+        self,
+        mode: IncidenceMode = "directed_pm1"
+    ) -> Tuple[List[List[int]], List[Tuple[int, int]]]:
+        """
+        Возвращает (матрица VxE, список рёбер E как пары (u,v)).
+        - directed_pm1: в столбце ребра e: -1 в u, +1 в v (петля даст 0 в строке u)
+        - undirected_1_2: 1 у концов ребра, 2 если петля (u,u)
+        """
         edges = self.to_edge_list()
         E = len(edges)
-        mat = [[0] * E for _ in range(V)]
+        M = [[0] * E for _ in range(self.n)]
+
         for e, (u, v) in enumerate(edges):
-            if self.directed:
-                mat[u][e] = -1
-                mat[v][e] = 1
+            if mode == "directed_pm1":
+                if u == v:
+                    M[u][e] = 0
+                else:
+                    M[u][e] = -1
+                    M[v][e] = 1
             else:
                 if u == v:
-                    mat[u][e] = 2  # петля
+                    M[u][e] = 2
                 else:
-                    mat[u][e] = 1
-                    mat[v][e] = 1
+                    M[u][e] = 1
+                    M[v][e] = 1
+
+        return M, edges
+
+    def to_incidence(self) -> List[List[int]]:
+        mode = "directed_pm1" if self.directed else "undirected_1_2"
+        mat, _ = self.to_incidence_matrix(mode=mode)
         return mat
 
-    # --- Файл (JSON) ---
+
     def to_dict(self) -> Dict[str, Any]:
         return {"directed": self.directed, "n": self.n, "adj": [sorted(list(s)) for s in self.adj]}
 
@@ -237,7 +254,10 @@ def print_matrix(mat: List[List[int]], title: str) -> None:
     if not mat:
         print("(пусто)")
         return
-    cols = len(mat[0])
+    cols = len(mat[0]) if mat else 0
+    if cols == 0:
+        print("(нет рёбер)")
+        return
     width = max(2, max(len(str(x)) for row in mat for x in row))
     header = " " * (width + 1) + " ".join(f"{j+1:>{width}}" for j in range(cols))
     print(header)
@@ -447,7 +467,9 @@ def main() -> None:
             elif form == "b":
                 print_matrix(g.to_adj_matrix(), "Матрица смежности")
             else:
-                print_matrix(g.to_incidence(), "Матрица инцидентности (V x E)")
+                mode = "directed_pm1" if g.directed else "undirected_1_2"
+                mat, _ = g.to_incidence_matrix(mode=mode)
+                print_matrix(mat, "Матрица инцидентности (V x E)")
             continue
 
         if cmd == "3":
@@ -508,7 +530,6 @@ class GraphGUI:
 
     def setup_ui(self) -> None:
         """Создание графического интерфейса"""
-        # Верхняя панель с кнопками
         top_frame = ttk.Frame(self.root)
         top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
@@ -521,16 +542,13 @@ class GraphGUI:
         ttk.Button(top_frame, text="📂 Загрузить", command=self.load_file).pack(side=tk.LEFT, padx=2)
         ttk.Button(top_frame, text="🔄 Преобразование", command=self.show_transformation).pack(side=tk.LEFT, padx=2)
 
-        # Кнопка переключения типа графа
         self.type_label = ttk.Label(top_frame, text="Неориентированный")
         self.type_label.pack(side=tk.LEFT, padx=10)
         ttk.Button(top_frame, text="🔄 Сменить тип", command=self.toggle_graph_type).pack(side=tk.LEFT, padx=2)
 
-        # Основная область с текстом
         content_frame = ttk.Frame(self.root)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Текстовое поле с прокруткой
         scrollbar = ttk.Scrollbar(content_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
@@ -582,7 +600,6 @@ class GraphGUI:
         dialog.title("Ввести список смежности")
         dialog.geometry("600x500")
 
-        # Верхняя часть
         top_frame = ttk.Frame(dialog)
         top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
@@ -593,7 +610,6 @@ class GraphGUI:
 
         ttk.Label(dialog, text="Для каждой вершины введите соседей через пробел (номера 1..N, или оставьте пустым):").pack(pady=5)
 
-        # Главный frame со скроллом
         main_frame = ttk.Frame(dialog)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -601,11 +617,9 @@ class GraphGUI:
         scrollbar = ttk.Scrollbar(main_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Список для всех строк
         rows_frame = ttk.Frame(main_frame)
         rows_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Текстовое поле вместо множества Entry-й
         text_widget = tk.Text(rows_frame, height=15, width=50, yscrollcommand=scrollbar.set)
         text_widget.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=text_widget.yview)
@@ -657,7 +671,6 @@ class GraphGUI:
         dialog.title("Ввести матрицу смежности")
         dialog.geometry("600x500")
 
-        # Верхняя часть
         top_frame = ttk.Frame(dialog)
         top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
@@ -668,7 +681,6 @@ class GraphGUI:
 
         ttk.Label(dialog, text="Введите матрицу смежности N x N (0 или 1, строки через Enter):").pack(pady=5)
 
-        # Главный frame со скроллом
         main_frame = ttk.Frame(dialog)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -676,7 +688,6 @@ class GraphGUI:
         scrollbar = ttk.Scrollbar(main_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Текстовое поле вместо множества Entry-й
         text_widget = tk.Text(main_frame, height=15, width=50, yscrollcommand=scrollbar.set)
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=text_widget.yview)
@@ -775,12 +786,16 @@ class GraphGUI:
         """Показать матрицу инцидентности"""
         self.clear_output()
         self.log("\n📊 Матрица инцидентности (V x E):")
-        mat = self.graph.to_incidence()
+        mode = "directed_pm1" if self.graph.directed else "undirected_1_2"
+        mat, _ = self.graph.to_incidence_matrix(mode=mode)
         if not mat:
             self.log("(пусто)")
             return
 
         cols = len(mat[0]) if mat else 0
+        if cols == 0:
+            self.log("(нет рёбер)")
+            return
         width = 3
         header = "    " + " ".join(f"{j+1:>{width}}" for j in range(cols))
         self.log(header)
@@ -927,7 +942,6 @@ class GraphGUI:
 
                 gtype = gen_type.get()
 
-                # Генерируем граф
                 adj_list: List[List[int]] = [[] for _ in range(n)]
 
                 if gtype == "random":
@@ -942,12 +956,10 @@ class GraphGUI:
                             adj_list[i].append(j)
                             adj_list[j].append(i)
                 elif gtype == "tree":
-                    # Простое дерево: каждая вершина i связана с вершиной i+1
                     for i in range(n - 1):
                         adj_list[i].append(i + 1)
                         adj_list[i + 1].append(i)
 
-                # Сортируем список смежности
                 for i in range(n):
                     adj_list[i].sort()
 
@@ -971,7 +983,6 @@ class GraphGUI:
         dialog.title("Преобразование графа")
         dialog.geometry("800x600")
 
-        # Текстовое поле с прокруткой
         text_frame = ttk.Frame(dialog)
         text_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -1013,7 +1024,6 @@ class GraphGUI:
             log_step("")
             time.sleep(0.5)
 
-            # Шаг 2: Матрица смежности
             log_step("ШАГ 2: ПРЕОБРАЗОВАНИЕ В МАТРИЦУ СМЕЖНОСТИ")
             log_step("-" * 70)
             log_step("Для каждой пары вершин (i, j) в матрице M[i][j]:")
@@ -1029,7 +1039,6 @@ class GraphGUI:
             log_step("")
             time.sleep(0.5)
 
-            # Шаг 3: Матрица инцидентности
             log_step("ШАГ 3: ПРЕОБРАЗОВАНИЕ В МАТРИЦУ ИНЦИДЕНТНОСТИ")
             log_step("-" * 70)
             log_step("Матрица V x E (вершины x рёбра).")
@@ -1042,24 +1051,25 @@ class GraphGUI:
                 log_step("  - M[v][e] = 2, если ребро - петля (v-v)")
             log_step("  - M[v][e] = 0, иначе\n")
 
-            edges = self.graph.to_edge_list()
-            incidence = self.graph.to_incidence()
+            mode = "directed_pm1" if self.graph.directed else "undirected_1_2"
+            incidence, edges = self.graph.to_incidence_matrix(mode=mode)
 
             log_step(f"Найденные рёбра: {len(edges)}")
-            for idx, (u, v) in enumerate(edges, start=1):
-                log_step(f"  Ребро {idx}: ({u+1}, {v+1})")
-            log_step("")
+            if len(edges) > 0:
+                for idx, (u, v) in enumerate(edges, start=1):
+                    log_step(f"  Ребро {idx}: ({u+1}, {v+1})")
+                log_step("")
 
-            if incidence:
                 width = 3
                 header = "    " + " ".join(f"{e+1:>{width}}" for e in range(len(edges)))
                 log_step(header)
                 for i, row in enumerate(incidence, start=1):
                     log_step(f"{i:>{3}} " + " ".join(f"{x:>{width}}" for x in row))
+            else:
+                log_step("(нет рёбер)")
             log_step("")
             time.sleep(0.5)
 
-            # Шаг 4: Список рёбер
             log_step("ШАГ 4: ПРЕДСТАВЛЕНИЕ СПИСКОМ РЁБЕР")
             log_step("-" * 70)
             log_step("Простой перечень всех рёбер в графе:\n")
@@ -1068,7 +1078,6 @@ class GraphGUI:
             log_step("")
             time.sleep(0.5)
 
-            # Итоговая информация
             log_step("=" * 70)
             log_step("ИТОГОВАЯ ИНФОРМАЦИЯ")
             log_step("=" * 70)
@@ -1078,7 +1087,6 @@ class GraphGUI:
             log_step(f"Плотность графа: {len(edges) / (n * (n-1) / 2) if n > 1 else 0:.2%}")
             log_step("=" * 70)
 
-        # Запускаем показ шагов в отдельном потоке
         thread = threading.Thread(target=show_steps, daemon=True)
         thread.start()
 
