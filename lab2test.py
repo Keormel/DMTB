@@ -63,8 +63,13 @@ class DFSTraversal:
             if not self.visited[neighbor]:
                 self.dfs(neighbor)
     
-    def traverse(self, start_vertex: int) -> List[int]:
-        """Выполнить DFS обход с заданной вершины"""
+    def traverse(self, start_vertex: int, visit_all: bool = True) -> List[int]:
+        """Выполнить DFS обход с заданной вершины
+        
+        Args:
+            start_vertex: начальная вершина
+            visit_all: если True, посетить все компоненты связности; если False, только компоненту начальной вершины
+        """
         # Проверяем корректность стартовой вершины
         if start_vertex < 0 or start_vertex >= self.graph.n:
             print(f"Ошибка: неверная стартовая вершина {start_vertex}!")
@@ -74,12 +79,18 @@ class DFSTraversal:
         self.visited = [False] * self.graph.n
         self.result = []
         
-        # Выполняем DFS
+        # Выполняем DFS с начальной вершины
         self.dfs(start_vertex)
+        
+        # Если нужно посетить все вершины, обходим оставшиеся компоненты
+        if visit_all:
+            for vertex in range(self.graph.n):
+                if not self.visited[vertex]:
+                    self.dfs(vertex)
         
         return self.result
     
-    def print_result(self, vertices: List[int]) -> None:
+    def print_result(self, vertices: List[int], show_components: bool = False) -> None:
         """Вывести результат обхода в виде списка"""
         if not vertices:
             print("Список вершин: (граф пуст или вершина недоступна)")
@@ -87,6 +98,7 @@ class DFSTraversal:
         
         print("Обход графа в глубину (DFS):")
         print(f"Список вершин: {' -> '.join(map(str, vertices))}")
+        print(f"Всего посещено вершин: {len(vertices)}")
 
 
 class BFSTraversal:
@@ -97,12 +109,8 @@ class BFSTraversal:
         self.visited = [False] * graph.n
         self.result = []
     
-    def bfs(self, start_vertex: int) -> List[int]:
-        """Обход в ширину (BFS)"""
-        if start_vertex < 0 or start_vertex >= self.graph.n:
-            print(f"Ошибка: неверная стартовая вершина {start_vertex}!")
-            return []
-        
+    def bfs_component(self, start_vertex: int) -> None:
+        """Обход в ширину одной компоненты связности"""
         queue = [start_vertex]
         self.visited[start_vertex] = True
         
@@ -114,14 +122,31 @@ class BFSTraversal:
                 if not self.visited[neighbor]:
                     self.visited[neighbor] = True
                     queue.append(neighbor)
-        
-        return self.result
     
-    def traverse(self, start_vertex: int) -> List[int]:
-        """Выполнить BFS обход с заданной вершины"""
+    def traverse(self, start_vertex: int, visit_all: bool = True) -> List[int]:
+        """Выполнить BFS обход с заданной вершины
+        
+        Args:
+            start_vertex: начальная вершина
+            visit_all: если True, посетить все компоненты связности; если False, только компоненту начальной вершины
+        """
+        if start_vertex < 0 or start_vertex >= self.graph.n:
+            print(f"Ошибка: неверная стартовая вершина {start_vertex}!")
+            return []
+        
         self.visited = [False] * self.graph.n
         self.result = []
-        return self.bfs(start_vertex)
+        
+        # Обходим начальную компоненту
+        self.bfs_component(start_vertex)
+        
+        # Если нужно посетить все вершины, обходим оставшиеся компоненты
+        if visit_all:
+            for vertex in range(self.graph.n):
+                if not self.visited[vertex]:
+                    self.bfs_component(vertex)
+        
+        return self.result
     
     def print_result(self, vertices: List[int]) -> None:
         """Вывести результат обхода в виде списка"""
@@ -131,6 +156,7 @@ class BFSTraversal:
         
         print("Обход графа в ширину (BFS):")
         print(f"Список вершин: {' -> '.join(map(str, vertices))}")
+        print(f"Всего посещено вершин: {len(vertices)}")
 
 
 def create_graph_interactive() -> Graph:
@@ -252,6 +278,39 @@ def create_directed_sample() -> Graph:
     return graph
 
 
+def find_connected_components(graph: Graph) -> List[List[int]]:
+    """Найти все компоненты связности в графе"""
+    visited = [False] * graph.n
+    components = []
+    
+    def dfs_component(vertex: int, component: List[int]) -> None:
+        visited[vertex] = True
+        component.append(vertex)
+        for neighbor in sorted(graph.adj[vertex]):
+            if not visited[neighbor]:
+                dfs_component(neighbor, component)
+    
+    for vertex in range(graph.n):
+        if not visited[vertex]:
+            component = []
+            dfs_component(vertex, component)
+            components.append(sorted(component))
+    
+    return components
+
+
+def print_connected_components(graph: Graph) -> None:
+    """Вывести все компоненты связности"""
+    components = find_connected_components(graph)
+    
+    if len(components) == 1:
+        print(f"✓ Граф связный (1 компонента, {len(components[0])} вершин)")
+    else:
+        print(f"✓ Граф несвязный ({len(components)} компоненты связности):")
+        for i, component in enumerate(components, 1):
+            print(f"   Компонента {i}: {component} ({len(component)} вершин)")
+
+
 def main():
     print("=" * 60)
     print("ЛАБОРАТОРНАЯ РАБОТА: ОБХОД ГРАФА (DFS и BFS)")
@@ -298,6 +357,12 @@ def main():
         print()
         graph.print_adjacency_list()
         
+        # Показываем компоненты связности
+        print("\n" + "-" * 60)
+        print("АНАЛИЗ СВЯЗНОСТИ")
+        print("-" * 60)
+        print_connected_components(graph)
+        
         # Выполняем обход
         print("\n" + "-" * 60)
         print("ОБХОД ГРАФА")
@@ -323,14 +388,21 @@ def main():
                     print(f"❌ Ошибка: вершина должна быть в диапазоне 0-{graph.n-1}")
                     continue
                 
+                print("\nРежимы обхода:")
+                print("1 - Только компонента начальной вершины")
+                print("2 - ВСЕ вершины графа (все компоненты)")
+                mode_choice = input("Выберите режим (1 или 2) [по умолчанию 2]: ").strip() or "2"
+                
+                visit_all = mode_choice != "1"
+                
                 if algo_choice == "1":
                     dfs_traversal = DFSTraversal(graph)
-                    result = dfs_traversal.traverse(start_vertex)
+                    result = dfs_traversal.traverse(start_vertex, visit_all=visit_all)
                     print()
                     dfs_traversal.print_result(result)
                 else:
                     bfs_traversal = BFSTraversal(graph)
-                    result = bfs_traversal.traverse(start_vertex)
+                    result = bfs_traversal.traverse(start_vertex, visit_all=visit_all)
                     print()
                     bfs_traversal.print_result(result)
                 
